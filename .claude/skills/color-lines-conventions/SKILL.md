@@ -42,3 +42,8 @@ rows listed; `_runs.mjs`, `_bbox.mjs`, `_dump.mjs`, `_crop.mjs` measure the orig
 
 `reference/` and `public/original/` are git-ignored: publishing the original's pictures is the
 owner's decision. Without them the deployed site draws stand-ins.
+
+## Decisions
+
+- Top Ten stays per device (localStorage), like the original's Lines.res on each PC: no online
+  leaderboard (owner's choice, 2026-10-21).
