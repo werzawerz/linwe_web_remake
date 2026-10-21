@@ -1,0 +1,8 @@
+node_modules/
+dist/
+original_game/
+screenshots/
+tools/_*.mjs
+*.local
+reference/
+public/original/
