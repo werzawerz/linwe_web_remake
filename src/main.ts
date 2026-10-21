@@ -38,6 +38,7 @@ let enteringName = false;
 let turnStart = performance.now(); // the original times each turn's thinking (scores less after ~50 min)
 let cursor = 40; // keyboard cursor cell (arrows + Space, as in the original)
 let cursorShown = false;
+let crownTaken = false;
 let typedName = '';
 let shownPillar = 0; // animated pretender height fraction
 
@@ -144,7 +145,7 @@ function drawBoardFrame(l: Layout): void {
   for (let c = 0; c < CELLS; c++) cell(g, x + (c % SIZE) * CELL_W, y + Math.floor(c / SIZE) * CELL_H);
 }
 
-function drawFigure(f: Figure, which: 'king' | 'pretender', frac: number, name: string): void {
+function drawFigure(f: Figure, which: 'king' | 'pretender', frac: number, name: string, crowned: boolean): void {
   const pillarH = Math.round(f.minH + (f.maxH - f.minH) * Math.max(0, Math.min(1, frac)));
   const capTop = f.baseY - pillarH;
   const bodyTop = capTop + SRC.capRows;
@@ -156,7 +157,7 @@ function drawFigure(f: Figure, which: 'king' | 'pretender', frac: number, name: 
     const top = Math.max(baseTop, bodyTop);
     const skip = top - baseTop;
     g.drawImage(sheet.game, SRC.pillar.x, SRC.pillarBaseY + skip, SRC.pillar.w, baseRows - skip, px, top, SRC.pillar.w, baseRows - skip);
-    const spr = which === 'king' ? sheet.king : sheet.pretender;
+    const spr = which === 'king' ? (crowned ? sheet.king : sheet.kingBare) : crowned ? sheet.pretenderCrowned : sheet.pretender;
     const src = which === 'king' ? SRC.king : SRC.pretender;
     const centre = which === 'king' ? SRC.kingPillarX : SRC.pretenderPillarX;
     g.drawImage(spr, f.x - (centre - src.x), capTop + SRC.capRows - spr.height);
@@ -169,12 +170,13 @@ function drawFigure(f: Figure, which: 'king' | 'pretender', frac: number, name: 
     drawBall(g, which === 'king' ? 1 : 7, f.x, capTop - 22, 50, 42);
     fill(g, color, f.x - 16, capTop - 4, 10, 4);
     fill(g, color, f.x + 6, capTop - 4, 10, 4);
-    if (which === 'king') {
+    if (crowned) {
       fill(g, YELLOW, f.x - 14, capTop - 52, 28, 10);
       fill(g, YELLOW, f.x - 14, capTop - 58, 4, 6);
       fill(g, YELLOW, f.x - 2, capTop - 60, 4, 8);
       fill(g, YELLOW, f.x + 10, capTop - 58, 4, 6);
-    } else {
+    }
+    if (which === 'pretender') {
       fill(g, LIGHT, f.x + 30, capTop - 50, 2, 28);
       fill(g, YELLOW, f.x + 26, capTop - 22, 10, 2);
     }
@@ -289,8 +291,12 @@ function draw(now: number): void {
   const target = pretenderStep(game.score, top[0].score) / 20;
   shownPillar += (target - shownPillar) * 0.08;
   if (Math.abs(shownPillar - target) < 0.002) shownPillar = target;
-  drawFigure(l.king, 'king', 1, top[0].name);
-  drawFigure(l.pretender, 'pretender', shownPillar, 'Pretender');
+  // the Pretender takes the crown as soon as the score passes the best (Top Ten #1)
+  const passed = game.score > top[0].score && screen !== 'over';
+  if (passed && !crownTaken) sfx.record();
+  crownTaken = passed;
+  drawFigure(l.king, 'king', 1, top[0].name, !passed);
+  drawFigure(l.pretender, 'pretender', shownPillar, 'Pretender', passed);
   drawBalls(l, now);
   if (screen === 'help') boxMessage(l, HELP, GREEN);
   if (screen === 'over' && !anims.length) {

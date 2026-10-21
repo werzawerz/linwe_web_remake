@@ -31,6 +31,12 @@ export const SRC = {
   /** The names under the pillars as the original wrote them. */
   alisa: r(64, 254, 45, 15),
   pretenderName: r(516, 254, 78, 15),
+  /** The crown on the King's head (rows 80..98, the head starts at y 100), passed to the Pretender. */
+  crown: r(66, 78, 30, 21),
+  /** The Pretender's top-knot, hidden under the crown; his head starts at y 180 (the King's at 100). */
+  topKnot: r(538, 155, 36, 25),
+  crownShiftX: 554 - 80,
+  crownShiftY: 180 - 100,
 } as const;
 
 export interface Sheet {
@@ -38,6 +44,9 @@ export interface Sheet {
   title: HTMLImageElement | null;
   king: HTMLCanvasElement;
   pretender: HTMLCanvasElement;
+  /** The King without his crown, the Pretender wearing it: shown once the score passes the best. */
+  kingBare: HTMLCanvasElement;
+  pretenderCrowned: HTMLCanvasElement;
   labelOn: HTMLCanvasElement[];
   labelOff: HTMLCanvasElement[];
 }
@@ -107,16 +116,40 @@ function recolor(c: HTMLCanvasElement, lit: boolean): HTMLCanvasElement {
   return out;
 }
 
+/** Clears a rect (in game.png coordinates) out of a sprite cut at `origin`. */
+function erase(sprite: HTMLCanvasElement, origin: Rect, s: Rect): void {
+  sprite.getContext('2d')!.clearRect(s.x - origin.x, s.y - origin.y, s.w, s.h);
+}
+
+/** Copy with black made transparent. */
+function blackToClear(c: HTMLCanvasElement): HTMLCanvasElement {
+  const g = c.getContext('2d')!;
+  const img = g.getImageData(0, 0, c.width, c.height);
+  for (let i = 0; i < img.data.length; i += 4) if (img.data[i] + img.data[i + 1] + img.data[i + 2] === 0) img.data[i + 3] = 0;
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
 export async function loadSheet(base: string): Promise<Sheet | null> {
   const [gameImg, title] = await Promise.all([load(`${base}original/game.png`), load(`${base}original/title.png`)]);
   if (!gameImg) return null;
   const game = crop(gameImg, r(0, 0, gameImg.width, gameImg.height));
   const labels = SRC.label.map((s) => crop(game, s));
+  const king = clearOutside(crop(game, SRC.king));
+  const pretender = clearOutside(crop(game, SRC.pretender));
+  const kingBare = crop(king, r(0, 0, king.width, king.height));
+  erase(kingBare, SRC.king, SRC.crown);
+  const pretenderCrowned = crop(pretender, r(0, 0, pretender.width, pretender.height));
+  erase(pretenderCrowned, SRC.pretender, SRC.topKnot);
+  const crown = blackToClear(crop(game, SRC.crown));
+  pretenderCrowned.getContext('2d')!.drawImage(crown, SRC.crown.x + SRC.crownShiftX - SRC.pretender.x, SRC.crown.y + SRC.crownShiftY - SRC.pretender.y);
   return {
     game,
     title,
-    king: clearOutside(crop(game, SRC.king)),
-    pretender: clearOutside(crop(game, SRC.pretender)),
+    king,
+    pretender,
+    kingBare,
+    pretenderCrowned,
     labelOn: labels.map((l) => recolor(l, true)),
     labelOff: labels.map((l) => recolor(l, false)),
   };

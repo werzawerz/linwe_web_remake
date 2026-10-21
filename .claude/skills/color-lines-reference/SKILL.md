@@ -70,4 +70,5 @@ pixel for pixel except names other than "Alisa" (font) and the mouse cursor in t
 
 - Animations (bounce, move, appear, vanish) and their timing; sounds other than the 220 Hz beep.
 - The original Top Ten and Help panels (LINES.LIB has them as PCX), the keyboard cursor's look,
-  how the Pretender "takes the crown" on screen. What "Colors" means.
+  how the original draws the crown passing (the remake moves the King's crown onto the
+  Pretender's head and hides his top-knot). What "Colors" means.
