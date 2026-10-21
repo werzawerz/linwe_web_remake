@@ -45,7 +45,7 @@ export function beep(notes: ReadonlyArray<readonly [number, number]>): void {
 export const sfx = {
   bounce: () => beep([[220, 12]]),
   step: () => beep([[880, 8]]),
-  cantMove: () => beep([[110, 120]]),
+  cantMove: () => beep([[220, 200]]), // the original: Sound(220) for 200 ms
   appear: () => beep([[660, 15], [990, 15]]),
   vanish: () => beep([[1320, 25], [1760, 25], [2093, 25], [2637, 40]]),
   gameOver: () => beep([[392, 160], [330, 160], [262, 320]]),

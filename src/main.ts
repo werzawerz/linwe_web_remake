@@ -1,12 +1,12 @@
 // Color Lines: screens, input and animation around the pure rules in game/rules.ts.
-import { CELLS, SIZE, findPath, move, newGame, type Game, type MoveResult } from './game/rules';
+import { CELLS, SIZE, findPath, move, newGame, pretenderStep, type Game, type MoveResult } from './game/rules';
 import { CELL_H, CELL_W, LANDSCAPE, PIXEL_ASPECT, PORTRAIT, buttonAt, cellAt, type Figure, type Layout } from './layout';
 import { BLACK, DARK, GREEN, GREY, LIGHT, YELLOW } from './gfx/palette';
 import { drawBall } from './gfx/balls';
 import { bevel, cell, fill, nameSprite, resetNames, scoreBox, text } from './gfx/draw';
 import { SRC, loadSheet, type Sheet } from './gfx/sheet';
 import { setSound, sfx, soundOn, unlockAudio } from './audio';
-import { loadSaved, save, type King } from './store';
+import { NAME_MAX, insertEntry, loadSaved, qualifies, save, type Entry } from './store';
 
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('screen') as HTMLCanvasElement;
@@ -15,7 +15,7 @@ const g = canvas.getContext('2d')!;
 type Screen = 'title' | 'play' | 'help' | 'over';
 
 const saved = loadSaved();
-let king: King = saved.king;
+let top: Entry[] = saved.top; // top[0] is the King
 let showNext = saved.showNext;
 setSound(saved.sound);
 let game: Game = saved.game && !params.has('seed') ? saved.game : newGame(seedFromParams());
@@ -33,8 +33,11 @@ let selectedAt = 0;
 let lastBounce = -1;
 let pressed = -1; // F-key shown pressed (index), until pressedUntil
 let pressedUntil = 0;
-let newRecord = false;
+let newRank = -1; // the player's place in the Top Ten after this game
 let enteringName = false;
+let turnStart = performance.now(); // the original times each turn's thinking (scores less after ~50 min)
+let cursor = 40; // keyboard cursor cell (arrows + Space, as in the original)
+let cursorShown = false;
 let typedName = '';
 let shownPillar = 0; // animated pretender height fraction
 
@@ -50,7 +53,7 @@ interface Anim {
 const anims: Anim[] = [];
 
 const MOVE_STEP_MS = 32;
-const APPEAR_MS = 220;
+const APPEAR_MS = 110;
 const VANISH_MS = 420;
 const BOUNCE_MS = 340;
 
@@ -60,7 +63,7 @@ function seedFromParams(): number {
 }
 
 function persist(): void {
-  save({ king, sound: soundOn, showNext, game: game.over ? null : game });
+  save({ top, sound: soundOn, showNext, game: game.over || screen === 'over' ? null : game });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -90,7 +93,7 @@ function drawChrome(l: Layout): void {
   fill(g, LIGHT, p.x - 1, p.y + p.h + 1, p.w + 3, 1);
   fill(g, BLACK, p.x, p.y, p.w, p.h);
 
-  scoreBox(g, l.hiscore.x, l.hiscore.y, king.score);
+  scoreBox(g, l.hiscore.x, l.hiscore.y, top[0].score);
   scoreBox(g, l.score.x, l.score.y, game.score);
 
   fill(g, BLACK, l.next.x, l.next.y, 103, 25);
@@ -217,6 +220,14 @@ function drawBalls(l: Layout, now: number): void {
     }
     drawBall(g, color, cx, cy, 25, 19);
   }
+  if (cursorShown && screen === 'play') {
+    const x = l.board.x + (cursor % SIZE) * CELL_W;
+    const y = l.board.y + Math.floor(cursor / SIZE) * CELL_H;
+    fill(g, YELLOW, x + 2, y + 1, 29, 1);
+    fill(g, YELLOW, x + 2, y + 21, 29, 1);
+    fill(g, YELLOW, x + 2, y + 1, 2, 21);
+    fill(g, YELLOW, x + 29, y + 1, 2, 21);
+  }
   if (a && a.kind === 'move' && now >= a.start) {
     const step = Math.min(a.cells.length - 1, Math.floor((now - a.start) / MOVE_STEP_MS));
     const [cx, cy] = cellCentre(l, a.cells[step]);
@@ -224,14 +235,14 @@ function drawBalls(l: Layout, now: number): void {
   }
 }
 
-function boxMessage(l: Layout, lines: string[], color = YELLOW): void {
+function boxMessage(l: Layout, lines: string[], color = YELLOW, highlight = -1): void {
   const w = 230;
   const h = 14 + lines.length * 14;
   const x = l.board.x + 153 - w / 2;
   const y = l.board.y + 107 - h / 2;
   bevel(g, x - 4, y - 3, w + 8, h + 6);
   fill(g, BLACK, x, y, w, h);
-  lines.forEach((s, i) => text(g, s, x + w / 2, y + 7 + i * 14, i === 0 ? color : LIGHT, 'center', 10));
+  lines.forEach((s, i) => text(g, s, x + w / 2, y + 7 + i * 14, i === 0 ? color : i === highlight ? YELLOW : LIGHT, 'center', 10));
 }
 
 const HELP = [
@@ -243,6 +254,7 @@ const HELP = [
   'row, column or diagonal vanish.',
   'Otherwise 3 new balls appear (Next).',
   'Longer lines score much more.',
+  'Arrows + Space play by keyboard.',
   'Beat the King to take his place!',
 ];
 
@@ -273,16 +285,17 @@ function draw(now: number): void {
   }
   drawChrome(l);
   drawBoardFrame(l);
-  const target = king.score > 0 ? game.score / king.score : 1;
-  shownPillar += (Math.min(1, target) - shownPillar) * 0.08;
-  if (Math.abs(shownPillar - target) < 0.002) shownPillar = Math.min(1, target);
-  drawFigure(l.king, 'king', 1, king.name);
+  // the original grows the Pretender in 20 steps: score * 20 / best
+  const target = pretenderStep(game.score, top[0].score) / 20;
+  shownPillar += (target - shownPillar) * 0.08;
+  if (Math.abs(shownPillar - target) < 0.002) shownPillar = target;
+  drawFigure(l.king, 'king', 1, top[0].name);
   drawFigure(l.pretender, 'pretender', shownPillar, 'Pretender');
   drawBalls(l, now);
   if (screen === 'help') boxMessage(l, HELP, GREEN);
   if (screen === 'over' && !anims.length) {
-    if (enteringName) boxMessage(l, ['NEW RECORD!', `Score: ${game.score}`, 'Enter your name:', `${typedName}_`, 'then press Enter']);
-    else boxMessage(l, ['GAME OVER', `Score: ${game.score}`, newRecord ? 'You are the new King!' : `King: ${king.name} ${king.score}`, 'Click to play again']);
+    if (enteringName) boxMessage(l, ['TOP TEN!', `Score: ${game.score}`, 'Enter your name:', `${typedName}_`, 'then press Enter']);
+    else boxMessage(l, ['TOP TEN', ...top.map((e, i) => `${String(i + 1).padStart(2)}. ${e.name.padEnd(NAME_MAX)} ${String(e.score).padStart(5)}`)], YELLOW, newRank + 1);
   }
 }
 
@@ -302,11 +315,20 @@ function playAnims(before: number[], from: number, r: MoveResult, now: number): 
     anims.push({ kind: 'vanish', board: b1, cells: r.removed, color: 0, start: t, dur: VANISH_MS });
     return;
   }
-  const b2 = b1.slice();
-  for (const p of r.placed) b2[p.cell] = p.color;
-  anims.push({ kind: 'appear', board: b2, cells: r.placed.map((p) => p.cell), color: 0, start: t, dur: APPEAR_MS });
-  t += APPEAR_MS;
-  if (r.removedByDrop.length) anims.push({ kind: 'vanish', board: b2, cells: r.removedByDrop, color: 0, start: t, dur: VANISH_MS });
+  // the original drops the balls one by one, each checked for a line as it lands
+  let b = b1;
+  for (const d of r.drops) {
+    b = b.slice();
+    b[d.cell] = d.color;
+    anims.push({ kind: 'appear', board: b, cells: [d.cell], color: 0, start: t, dur: APPEAR_MS });
+    t += APPEAR_MS;
+    if (d.removed.length) {
+      anims.push({ kind: 'vanish', board: b, cells: d.removed, color: 0, start: t, dur: VANISH_MS });
+      t += VANISH_MS;
+      b = b.slice();
+      for (const c of d.removed) b[c] = 0;
+    }
+  }
 }
 
 let lastStep = -1;
@@ -326,14 +348,20 @@ function tickAnims(now: number): void {
     const n = anims[0];
     if (n?.kind === 'vanish') sfx.vanish();
     if (n?.kind === 'appear') sfx.appear();
-    if (!anims.length && game.over) endGame();
+    if (!anims.length) {
+      turnStart = now;
+      if (game.over) endGame();
+    }
   }
 }
 
+/** End of a game (board full, or F4 as in the original): the Top Ten, with a name entry if the score earns a place. */
 function endGame(): void {
   screen = 'over';
-  newRecord = game.score > king.score;
-  if (newRecord) {
+  selected = -1;
+  anims.length = 0;
+  newRank = -1;
+  if (qualifies(top, game.score)) {
     sfx.record();
     askName();
   } else sfx.gameOver();
@@ -342,17 +370,18 @@ function endGame(): void {
 
 function askName(): void {
   if (matchMedia('(pointer: coarse)').matches) {
-    const answer = window.prompt(`New record: ${game.score}! Your name:`, '') ?? '';
-    setKing(answer);
+    const answer = window.prompt(`Top Ten: ${game.score}! Your name:`, '') ?? '';
+    enterName(answer);
   } else {
     enteringName = true;
     typedName = '';
   }
 }
 
-function setKing(name: string): void {
-  const clean = name.trim().slice(0, 12) || 'Player';
-  king = { name: clean, score: game.score };
+function enterName(name: string): void {
+  const r = insertEntry(top, { name: name.trim() || 'Player', score: game.score });
+  top = r.table;
+  newRank = r.rank;
   enteringName = false;
   persist();
 }
@@ -362,9 +391,10 @@ function restart(): void {
   anims.length = 0;
   selected = -1;
   screen = 'play';
-  newRecord = false;
+  newRank = -1;
   enteringName = false;
   shownPillar = 0;
+  turnStart = performance.now();
   persist();
 }
 
@@ -374,7 +404,13 @@ function pressButton(i: number): void {
   if (i === 0) screen = screen === 'help' ? 'play' : screen === 'play' ? 'help' : screen;
   if (i === 1) setSound(!soundOn);
   if (i === 2) showNext = !showNext;
-  if (i === 3) restart();
+  if (i === 3) {
+    // F4 ends the game and, as in the original, still offers the Top Ten
+    if (screen === 'over') {
+      if (!enteringName) restart();
+    } else if (game.score > 0) endGame();
+    else restart();
+  }
   persist();
 }
 
@@ -393,7 +429,7 @@ function clickCell(c: number, now: number): void {
   }
   const before = game.board.slice();
   const from = selected;
-  const r = move(game, from, c);
+  const r = move(game, from, c, (now - turnStart) / 1000);
   selected = -1;
   if (!r) return;
   playAnims(before, from, r, now);
@@ -425,15 +461,19 @@ function pointer(e: PointerEvent): void {
     return;
   }
   const c = cellAt(layout, x, y);
-  if (c >= 0) clickCell(c, now);
+  if (c >= 0) {
+    cursor = c;
+    cursorShown = false;
+    clickCell(c, now);
+  }
 }
 
 function key(e: KeyboardEvent): void {
   if (enteringName) {
     e.preventDefault();
-    if (e.key === 'Enter') setKing(typedName);
+    if (e.key === 'Enter') enterName(typedName);
     else if (e.key === 'Backspace') typedName = typedName.slice(0, -1);
-    else if (e.key.length === 1 && typedName.length < 12) typedName += e.key;
+    else if (e.key.length === 1 && typedName.length < NAME_MAX) typedName += e.key;
     return;
   }
   const f = ['F1', 'F2', 'F3', 'F4'].indexOf(e.key);
@@ -447,7 +487,23 @@ function key(e: KeyboardEvent): void {
     screen = 'play';
     return;
   }
-  if (screen === 'over' && (e.key === 'Enter' || e.key === ' ')) restart();
+  if (screen === 'over') {
+    if (e.key === 'Enter' || e.key === ' ') restart();
+    return;
+  }
+  const arrows: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  const d = arrows[e.key];
+  if (d) {
+    e.preventDefault();
+    cursorShown = true;
+    const x = Math.max(0, Math.min(SIZE - 1, (cursor % SIZE) + d[0]));
+    const y = Math.max(0, Math.min(SIZE - 1, Math.floor(cursor / SIZE) + d[1]));
+    cursor = y * SIZE + x;
+  } else if (e.key === ' ' || e.key === 'Enter') {
+    e.preventDefault();
+    cursorShown = true;
+    clickCell(cursor, performance.now());
+  }
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -20,14 +20,31 @@ and record what was found here.
 
 ## Rules (src/game/rules.ts)
 
-| Rule | Status |
-| --- | --- |
-| 9x9 board, 7 colours, starts with 5 balls, 3 "next" balls shown | verified (Wikipedia + screenshot: 5 balls at score 0) |
-| Move along free cells, 4-neighbour path | verified (Wikipedia) |
-| 5+ in a row/column/diagonal vanish, player moves again, no new balls | verified (Wikipedia) |
-| Balls dropped by the computer that complete a line vanish and score | assumed (as in later versions) |
-| Points for n balls: 10, 12, 18, 28, 42 for 5..9 (10 + 2(n-5)^2) | **guess** (Lines 98 table); verify in the emulator |
-| Game over when the board is full | verified |
+Main source: **rembish/color-lines-game** (github.com/rembish/color-lines-game), a reverse-engineering
+of the original LINES.EXE with a difftest against recorded games; facts in its `re/NOTES.md`.
+Read it for facts only, never copy its code.
+
+- 9x9, 7 colours. Start: draw the next colours, then 5 balls (position, then colour), each checked
+  for lines (a line while seeding is removed and replaced).
+- Random numbers: Turbo Pascal's, `RandSeed = RandSeed * 0x08088405 + 1`, `Random(n) = (RandSeed >> 16) mod n`.
+  Colour `Random(7) + 1`; position `k = Random(80)` (cell k, column k mod 9), probing k + 1 while
+  taken, 81 wraps to 0 (so the bottom-right cell is only reached by probing).
+- Next colours: `min(free, 3)` of them. F3 only hides them (same random numbers either way).
+- Path: breadth-first over empty cells, neighbours up, down, left, right. Unreachable: beep 220 Hz
+  200 ms, nothing changes. Clicking another ball reselects.
+- Lines: for row, column, both diagonals through the cell, every run of 5+ of its colour along that
+  line. `count` sums the runs, so a cross's centre counts once per direction (5 + 5 = 10).
+- **Points: `Round(((count - 5)^2 + 5) * f)`, `f = 2.0 - (t / 6000.0) * 0.2`, 0 if negative**, t =
+  seconds thought (turn start, after the previous placements, to the accepted destination). Quick
+  lines: 5 = 10, 6 = 12, 7 = 18, 8 = 28, 9 = 42; a 5 + 5 cross = 60. Less only after ~50 minutes.
+  The original computes in 6-byte Reals; doubles differ by a point only at exact rounding ties.
+- After a line: no new balls, move again. Otherwise the next balls drop one by one, each checked
+  for lines as it lands (scored the same way), then new next colours.
+- Game ends when the board is full; F4 also ends it. Both offer the Top Ten.
+- Top Ten (Lines.res): 10 entries, name up to 13 chars. Default: #1 "Handicap" 100, the rest
+  "- Empty -" 0. A score above #10 enters, above the first strictly lower score. #1 is the King.
+- Pretender grows with `score * 20 / best` (steps 0..20) and takes the crown when the score passes.
+- Keyboard: arrows move a cursor, Space selects/moves; F1 help, F2 sound, F3 next, F4 restart, Esc quit.
 
 ## Screen (640x350 EGA, shown at 4:3)
 
@@ -42,16 +59,15 @@ pixel for pixel except names other than "Alisa" (font) and the mouse cursor in t
   grid lines. Next: 3 cells in a black frame at (271,4). Score boxes 86x19 at (48,7) (record) and
   (500,7) (your score). Labels "Next" (211,13), "Colors" (395,13).
 - Bottom bar: Gamos logo, F1 HELP, F2 SOUND, F3 NEXT, F4 RESTART; green text = switched on.
-- King (record holder, "Alisa" with 700 on the capture) on a tall pillar left; Pretender (magenta,
+- King (Top Ten #1; "Alisa" with 700 on the capture is someone's saved table) on a tall pillar left; Pretender (magenta,
   sword) right, on a pillar that is short at score 0 (cap at y219, king's at y136). The remake grows
-  it in proportion to score / record — **guess**, verify how the original grows it.
+  it in 20 steps (see Rules).
 - Balls: 25x19 on the board, 9x7 in Next. Two styles taken from the screen: dithered (red, dark red,
   green: two tones checkered, the highlight is the grey cell showing through) and flat (yellow, light
   blue, blue: one colour + highlight). Magenta is not on the capture: **guess** (dithered fc00fc/a800a8).
 
-## Not yet known (check in the emulator)
+## Not yet known (check in the emulator, or the original's LINES.LIB pictures)
 
-- Exact scoring; selected-ball bounce, move, appear and vanish animations and their timing; sounds.
-- What "Colors" means (a label, or a switch?), what F1 HELP shows, whether F4 asks for confirmation.
-- Game-over and new-record screens (name entry), the default record.
-- Does hiding Next (F3) change scoring?
+- Animations (bounce, move, appear, vanish) and their timing; sounds other than the 220 Hz beep.
+- The original Top Ten and Help panels (LINES.LIB has them as PCX), the keyboard cursor's look,
+  how the Pretender "takes the crown" on screen. What "Colors" means.
